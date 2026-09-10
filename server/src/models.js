@@ -1,0 +1,6 @@
+import mongoose from 'mongoose';
+
+const userSchema = new mongoose.Schema({ name: { type: String, required: true }, email: { type: String, required: true, unique: true, lowercase: true }, password: { type: String, required: true }, organization: { type: String, required: true } }, { timestamps: true });
+const documentSchema = new mongoose.Schema({ owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, originalName: String, fileName: String, mimeType: String, documentType: { type: String, default: 'Invoice' }, vendor: String, customer: String, invoiceNumber: String, invoiceDate: Date, subtotal: { type: Number, default: 0 }, gst: { type: Number, default: 0 }, total: { type: Number, default: 0 }, currency: String, items: [{ name: String, quantity: Number, unitPrice: Number, amount: Number }], gstin: String, confidence: { type: Number, default: 0 }, rawText: String, status: { type: String, enum: ['processing', 'review', 'approved', 'rejected'], default: 'processing' }, issues: [String], isDuplicate: { type: Boolean, default: false } }, { timestamps: true });
+export const User = mongoose.model('User', userSchema);
+export const Document = mongoose.model('Document', documentSchema);
