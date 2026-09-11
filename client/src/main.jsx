@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BrowserRouter,
@@ -13,14 +13,19 @@ import "./styles.css";
 
 const API = "http://localhost:5000/api";
 
-const money = (n) =>
-  `₹${Number(n || 0).toLocaleString("en-IN")}`;
+/* =========================================================
+   API HELPER
+========================================================= */
 
 async function api(path, options = {}) {
   const token = localStorage.getItem("token");
 
   const headers = {
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(token
+      ? {
+          Authorization: `Bearer ${token}`
+        }
+      : {}),
     ...(options.headers || {})
   };
 
@@ -32,16 +37,147 @@ async function api(path, options = {}) {
   let body = null;
 
   try {
-    body = response.status === 204 ? null : await response.json();
+    body =
+      response.status === 204
+        ? null
+        : await response.json();
   } catch {
     body = null;
   }
 
   if (!response.ok) {
-    throw new Error(body?.message || "Request failed");
+    throw new Error(
+      body?.message || "Request failed"
+    );
   }
 
   return body;
+}
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function money(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return "—";
+  }
+
+  const number = Number(value);
+
+  if (Number.isNaN(number)) {
+    return String(value);
+  }
+
+  return `₹${number.toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  })}`;
+}
+
+function formatDate(value) {
+  if (!value) {
+    return "—";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return date.toLocaleDateString("en-IN");
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "—";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return date.toLocaleString("en-IN");
+}
+
+function prettyKey(key) {
+  if (!key) {
+    return "";
+  }
+
+  return String(key)
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]/g, " ")
+    .replace(/\b\w/g, (char) =>
+      char.toUpperCase()
+    );
+}
+
+function formatFieldValue(key, value) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return "Not found";
+  }
+
+  if (
+    typeof value === "object"
+  ) {
+    return JSON.stringify(
+      value,
+      null,
+      2
+    );
+  }
+
+  const lowerKey = String(key).toLowerCase();
+
+  if (
+    lowerKey.includes("date") &&
+    typeof value === "string"
+  ) {
+    return value;
+  }
+
+  if (
+    typeof value === "number" &&
+    (
+      lowerKey.includes("amount") ||
+      lowerKey.includes("total") ||
+      lowerKey.includes("subtotal") ||
+      lowerKey.includes("gst") ||
+      lowerKey.includes("tax") ||
+      lowerKey.includes("price") ||
+      lowerKey.includes("cost")
+    )
+  ) {
+    return money(value);
+  }
+
+  return String(value);
+}
+
+function normalizeUser(user) {
+  if (!user) {
+    return null;
+  }
+
+  return {
+    ...user,
+    id: user.id || user._id || null,
+    role: user.role
+      ? String(user.role).toLowerCase()
+      : null
+  };
 }
 
 /* =========================================================
@@ -49,8 +185,11 @@ async function api(path, options = {}) {
 ========================================================= */
 
 function Auth({ onAuth }) {
-  const [register, setRegister] = useState(false);
-  const [role, setRole] = useState("client");
+  const [register, setRegister] =
+    useState(false);
+
+  const [role, setRole] =
+    useState("client");
 
   const [form, setForm] = useState({
     email: "",
@@ -61,8 +200,11 @@ function Auth({ onAuth }) {
     branch: ""
   });
 
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [error, setError] =
+    useState("");
+
+  const [busy, setBusy] =
+    useState(false);
 
   const nav = useNavigate();
 
@@ -102,68 +244,84 @@ function Auth({ onAuth }) {
         if (role === "client") {
           payload = {
             role: "client",
-            email: form.email,
+            email: form.email.trim(),
             password: form.password
           };
         } else {
           payload = {
             role: "accountant",
-            name: form.name,
-            organization: form.organization,
-            accountantId: form.accountantId,
-            branch: form.branch,
-            email: form.email,
+            name: form.name.trim(),
+            organization:
+              form.organization.trim(),
+            accountantId:
+              form.accountantId.trim(),
+            branch: form.branch.trim(),
+            email: form.email.trim(),
             password: form.password
           };
         }
       } else {
         payload = {
-          email: form.email,
+          email: form.email.trim(),
           password: form.password
         };
       }
 
       const response = await api(
-        `/auth/${register ? "register" : "login"}`,
+        `/auth/${
+          register
+            ? "register"
+            : "login"
+        }`,
         {
           method: "POST",
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type":
+              "application/json"
           },
           body: JSON.stringify(payload)
         }
       );
 
       if (!response?.token) {
-        throw new Error("Authentication token was not returned by the server.");
+        throw new Error(
+          "Authentication token was not returned by the server."
+        );
       }
 
       const authenticatedUser =
-        response?.user ||
-        response?.data?.user ||
-        response?.data ||
-        null;
+        normalizeUser(
+          response?.user ||
+            response?.data?.user ||
+            response?.data ||
+            null
+        );
 
       if (!authenticatedUser) {
-        throw new Error("User information was not returned by the server.");
+        throw new Error(
+          "User information was not returned by the server."
+        );
       }
 
       if (!authenticatedUser.role) {
-        throw new Error("User role was not returned by the server.");
+        throw new Error(
+          "User role was not returned by the server."
+        );
       }
 
-      const authData = {
+      onAuth({
         token: response.token,
         user: authenticatedUser
-      };
-
-      onAuth(authData);
+      });
 
       nav("/dashboard", {
         replace: true
       });
     } catch (e) {
-      setError(e.message || "Something went wrong.");
+      setError(
+        e.message ||
+          "Something went wrong."
+      );
     } finally {
       setBusy(false);
     }
@@ -171,7 +329,7 @@ function Auth({ onAuth }) {
 
   return (
     <main className="auth">
-      <section>
+      <section className="auth-card">
         <div className="brand">
           ◈ Ledger<span>Agent</span>
         </div>
@@ -185,6 +343,12 @@ function Auth({ onAuth }) {
             ? "Create an account"
             : "Welcome back"}
         </h1>
+
+        <p className="auth-description">
+          {register
+            ? "Create your LedgerAgent workspace account."
+            : "Sign in to continue to your accounting workspace."}
+        </p>
 
         <form onSubmit={submit}>
           {register && (
@@ -210,60 +374,81 @@ function Auth({ onAuth }) {
             </label>
           )}
 
-          {register && role === "accountant" && (
-            <>
-              <label>
-                Name
+          {register &&
+            role === "accountant" && (
+              <>
+                <label>
+                  Name
 
-                <input
-                  type="text"
-                  required
-                  value={form.name}
-                  onChange={(e) =>
-                    set("name", e.target.value)
-                  }
-                />
-              </label>
+                  <input
+                    type="text"
+                    required
+                    value={form.name}
+                    onChange={(e) =>
+                      set(
+                        "name",
+                        e.target.value
+                      )
+                    }
+                    placeholder="Full name"
+                  />
+                </label>
 
-              <label>
-                Organization
+                <label>
+                  Organization
 
-                <input
-                  type="text"
-                  required
-                  value={form.organization}
-                  onChange={(e) =>
-                    set("organization", e.target.value)
-                  }
-                />
-              </label>
+                  <input
+                    type="text"
+                    required
+                    value={
+                      form.organization
+                    }
+                    onChange={(e) =>
+                      set(
+                        "organization",
+                        e.target.value
+                      )
+                    }
+                    placeholder="Organization name"
+                  />
+                </label>
 
-              <label>
-                Branch
+                <label>
+                  Branch
 
-                <input
-                  type="text"
-                  value={form.branch}
-                  onChange={(e) =>
-                    set("branch", e.target.value)
-                  }
-                />
-              </label>
+                  <input
+                    type="text"
+                    value={form.branch}
+                    onChange={(e) =>
+                      set(
+                        "branch",
+                        e.target.value
+                      )
+                    }
+                    placeholder="Optional branch"
+                  />
+                </label>
 
-              <label>
-                Accountant ID
+                <label>
+                  Accountant ID
 
-                <input
-                  type="text"
-                  required
-                  value={form.accountantId}
-                  onChange={(e) =>
-                    set("accountantId", e.target.value)
-                  }
-                />
-              </label>
-            </>
-          )}
+                  <input
+                    type="text"
+                    required
+                    value={
+                      form.accountantId
+                    }
+                    onChange={(e) =>
+                      set(
+                        "accountantId",
+                        e.target.value
+                      )
+                    }
+                    placeholder="Accountant ID"
+                  />
+                </label>
+              </>
+            )}
 
           <label>
             Email
@@ -273,8 +458,12 @@ function Auth({ onAuth }) {
               required
               value={form.email}
               onChange={(e) =>
-                set("email", e.target.value)
+                set(
+                  "email",
+                  e.target.value
+                )
               }
+              placeholder="you@example.com"
             />
           </label>
 
@@ -287,8 +476,12 @@ function Auth({ onAuth }) {
               required
               value={form.password}
               onChange={(e) =>
-                set("password", e.target.value)
+                set(
+                  "password",
+                  e.target.value
+                )
               }
+              placeholder="Minimum 6 characters"
             />
           </label>
 
@@ -303,7 +496,7 @@ function Auth({ onAuth }) {
             disabled={busy}
           >
             {busy
-              ? "Please wait…"
+              ? "Please wait..."
               : register
               ? "Register"
               : "Login"}
@@ -314,29 +507,17 @@ function Auth({ onAuth }) {
           {register
             ? "Already registered?"
             : "New to LedgerAgent?"}{" "}
-
           <button
             type="button"
             className="link-button"
             onClick={switchMode}
           >
-            {register ? "Login" : "Register"}
+            {register
+              ? "Login"
+              : "Register"}
           </button>
         </p>
       </section>
-
-      <aside>
-        <span>✦</span>
-
-        <h2>
-          Documents to decisions.
-        </h2>
-
-        <p>
-          Secure AI-assisted accounting
-          workflows for clients and accountants.
-        </p>
-      </aside>
     </main>
   );
 }
@@ -345,14 +526,11 @@ function Auth({ onAuth }) {
    MAIN SHELL
 ========================================================= */
 
-function Shell({ user, onLogout }) {
+function Shell({
+  user,
+  onLogout
+}) {
   const navigate = useNavigate();
-
-  /*
-    IMPORTANT:
-    Prevent the application from crashing if the
-    authenticated user is incomplete.
-  */
 
   if (!user || !user.role) {
     return (
@@ -363,7 +541,8 @@ function Shell({ user, onLogout }) {
     );
   }
 
-  const role = String(user.role).toLowerCase();
+  const role =
+    String(user.role).toLowerCase();
 
   const displayName =
     user.name ||
@@ -372,31 +551,63 @@ function Shell({ user, onLogout }) {
 
   const initials =
     displayName
+      .trim()
+      .split(/\s+/)
       .slice(0, 2)
-      .toUpperCase();
+      .map(
+        (part) =>
+          part[0]
+      )
+      .join("")
+      .toUpperCase() || "U";
 
   const nav =
     role === "accountant"
       ? [
-          ["dashboard", "Dashboard"],
-          ["documents", "Client documents"],
-          ["review", "Review queue"],
-          ["reports", "Reports"]
+          [
+            "dashboard",
+            "Dashboard"
+          ],
+          [
+            "documents",
+            "Client documents"
+          ],
+          [
+            "review",
+            "Review queue"
+          ],
+          [
+            "reports",
+            "Reports"
+          ]
         ]
       : [
-          ["dashboard", "Dashboard"],
-          ["documents", "My documents"],
-          ["upload", "Upload document"],
-          ["reports", "Reports"],
           [
-            "change-accountant",
-            "Request change"
+            "dashboard",
+            "Dashboard"
+          ],
+          [
+            "documents",
+            "My documents"
+          ],
+          [
+            "upload",
+            "Upload document"
+          ],
+          [
+            "reports",
+            "Reports"
           ]
         ];
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
+    localStorage.removeItem(
+      "token"
+    );
+
+    localStorage.removeItem(
+      "user"
+    );
 
     onLogout();
 
@@ -412,22 +623,25 @@ function Shell({ user, onLogout }) {
           ◈ Ledger<span>Agent</span>
         </div>
 
-        <nav>
-          {nav.map(([to, label]) => (
-            <NavLink
-              to={`/${to}`}
-              key={to}
-              end={to === "dashboard"}
-            >
-              {label}
-            </NavLink>
-          ))}
+        <nav className="main-nav">
+          {nav.map(
+            ([to, label]) => (
+              <NavLink
+                to={`/${to}`}
+                key={to}
+                end={
+                  to ===
+                  "dashboard"
+                }
+              >
+                {label}
+              </NavLink>
+            )
+          )}
         </nav>
 
         <div className="side-user">
-          <b>
-            {initials}
-          </b>
+          <b>{initials}</b>
 
           <span>
             {displayName}
@@ -441,7 +655,9 @@ function Shell({ user, onLogout }) {
         <button
           type="button"
           className="logout"
-          onClick={handleLogout}
+          onClick={
+            handleLogout
+          }
         >
           Logout
         </button>
@@ -451,7 +667,8 @@ function Shell({ user, onLogout }) {
         <header>
           <div>
             <p className="eyebrow">
-              {role.toUpperCase()} WORKSPACE
+              {role.toUpperCase()}{" "}
+              WORKSPACE
             </p>
 
             <h1>
@@ -468,64 +685,65 @@ function Shell({ user, onLogout }) {
           <Route
             path="dashboard"
             element={
-              <Dashboard user={user} />
+              <Dashboard
+                user={user}
+              />
             }
           />
 
           <Route
             path="documents"
             element={
-              <Documents user={user} />
+              <Documents
+                user={user}
+              />
             }
           />
 
           <Route
             path="upload"
             element={
-              role === "client"
-                ? <Upload />
-                : <Navigate
-                    to="/dashboard"
-                    replace
-                  />
+              role === "client" ? (
+                <Upload />
+              ) : (
+                <Navigate
+                  to="/dashboard"
+                  replace
+                />
+              )
             }
           />
 
           <Route
             path="documents/:id"
             element={
-              <Details user={user} />
+              <Details
+                user={user}
+              />
             }
           />
 
           <Route
             path="review"
             element={
-              role === "accountant"
-                ? <Review />
-                : <Navigate
-                    to="/dashboard"
-                    replace
-                  />
+              role ===
+              "accountant" ? (
+                <Review />
+              ) : (
+                <Navigate
+                  to="/dashboard"
+                  replace
+                />
+              )
             }
           />
 
           <Route
             path="reports"
             element={
-              <Reports />
-            }
-          />
-
-          <Route
-            path="change-accountant"
-            element={
-              role === "client"
-                ? <ChangeRequest />
-                : <Navigate
-                    to="/dashboard"
-                    replace
-                  />
+              <Reports
+                user={user}
+              />
             }
           />
 
@@ -548,27 +766,45 @@ function Shell({ user, onLogout }) {
    CLIENT ASSIGNMENT
 ========================================================= */
 
-function Assignment({ onDone }) {
-  const [orgs, setOrgs] = useState([]);
-  const [org, setOrg] = useState("");
-  const [accountants, setAccountants] = useState([]);
-  const [accountantId, setAccountantId] =
+function Assignment({
+  onDone
+}) {
+  const [orgs, setOrgs] =
+    useState([]);
+
+  const [org, setOrg] =
     useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+
+  const [
+    accountants,
+    setAccountants
+  ] = useState([]);
+
+  const [
+    accountantId,
+    setAccountantId
+  ] = useState("");
+
+  const [error, setError] =
+    useState("");
+
+  const [loading, setLoading] =
+    useState(false);
 
   useEffect(() => {
     let active = true;
 
     api("/organizations")
       .then((data) => {
-        if (active) {
-          setOrgs(
-            Array.isArray(data)
-              ? data
-              : []
-          );
+        if (!active) {
+          return;
         }
+
+        setOrgs(
+          Array.isArray(data)
+            ? data
+            : []
+        );
       })
       .catch((e) => {
         if (active) {
@@ -584,10 +820,12 @@ function Assignment({ onDone }) {
   useEffect(() => {
     if (!org) {
       setAccountants([]);
+      setAccountantId("");
       return;
     }
 
     setError("");
+    setAccountantId("");
 
     api(
       `/organizations/${encodeURIComponent(
@@ -624,7 +862,8 @@ function Assignment({ onDone }) {
         {
           method: "PUT",
           headers: {
-            "Content-Type": "application/json"
+            "Content-Type":
+              "application/json"
           },
           body: JSON.stringify({
             organization: org,
@@ -633,14 +872,21 @@ function Assignment({ onDone }) {
         }
       );
 
-      if (data) {
+      const updatedUser =
+        normalizeUser(
+          data?.user || data
+        );
+
+      if (updatedUser) {
         localStorage.setItem(
           "user",
-          JSON.stringify(data.user || data)
+          JSON.stringify(
+            updatedUser
+          )
         );
       }
 
-      onDone(data);
+      onDone(updatedUser);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -650,19 +896,32 @@ function Assignment({ onDone }) {
 
   return (
     <section className="panel assignment">
+      <div className="assignment-icon">
+        ◈
+      </div>
+
+      <p className="eyebrow">
+        FIRST-TIME SETUP
+      </p>
+
       <h2>
-        Select your organization and accountant
+        Select your organization
       </h2>
+
+      <p>
+        Choose your organization and
+        assigned accountant before
+        uploading documents.
+      </p>
 
       <label>
         Organization
 
         <select
           value={org}
-          onChange={(e) => {
-            setOrg(e.target.value);
-            setAccountantId("");
-          }}
+          onChange={(e) =>
+            setOrg(e.target.value)
+          }
           required
         >
           <option value="">
@@ -672,7 +931,10 @@ function Assignment({ onDone }) {
           {orgs.map((x) => (
             <option
               value={x.name}
-              key={x._id || x.name}
+              key={
+                x._id ||
+                x.name
+              }
             >
               {x.name}
             </option>
@@ -697,16 +959,20 @@ function Assignment({ onDone }) {
               Choose accountant
             </option>
 
-            {accountants.map((x) => (
-              <option
-                value={x._id}
-                key={x._id}
-              >
-                {x.name} —{" "}
-                {x.branch ||
-                  "Branch not specified"}
-              </option>
-            ))}
+            {accountants.map(
+              (x) => (
+                <option
+                  value={x._id}
+                  key={x._id}
+                >
+                  {x.name ||
+                    x.email}{" "}
+                  —{" "}
+                  {x.branch ||
+                    "Branch not specified"}
+                </option>
+              )
+            )}
           </select>
         </label>
       )}
@@ -714,7 +980,8 @@ function Assignment({ onDone }) {
       <button
         type="button"
         disabled={
-          !accountantId || loading
+          !accountantId ||
+          loading
         }
         onClick={save}
       >
@@ -736,16 +1003,25 @@ function Assignment({ onDone }) {
    DASHBOARD
 ========================================================= */
 
-function Dashboard({ user }) {
-  const [data, setData] = useState(null);
-  const [current, setCurrent] =
-    useState(user);
-  const [error, setError] = useState("");
+function Dashboard({
+  user
+}) {
+  const [data, setData] =
+    useState(null);
+
+  const [
+    currentUser,
+    setCurrentUser
+  ] = useState(user);
+
+  const [error, setError] =
+    useState("");
 
   useEffect(() => {
     let active = true;
 
     setError("");
+    setData(null);
 
     api("/dashboard")
       .then((response) => {
@@ -762,7 +1038,7 @@ function Dashboard({ user }) {
     return () => {
       active = false;
     };
-  }, [current]);
+  }, [currentUser]);
 
   if (error) {
     return (
@@ -789,30 +1065,32 @@ function Dashboard({ user }) {
   ) {
     return (
       <Assignment
-        onDone={(response) => {
-          const updatedUser =
-            response?.user ||
-            response;
-
+        onDone={(updatedUser) => {
           if (updatedUser) {
             localStorage.setItem(
               "user",
-              JSON.stringify(updatedUser)
+              JSON.stringify(
+                updatedUser
+              )
             );
 
-            setCurrent(
+            setCurrentUser(
               updatedUser
             );
+          } else {
+            setCurrentUser({
+              ...currentUser
+            });
           }
-
-          setData(null);
         }}
       />
     );
   }
 
   const clientList =
-    Array.isArray(data.clientList)
+    Array.isArray(
+      data.clientList
+    )
       ? data.clientList
       : [];
 
@@ -838,17 +1116,26 @@ function Dashboard({ user }) {
           <p>
             Organization:{" "}
             <b>
-              {data.assignment.organization}
+              {
+                data.assignment
+                  .organization
+              }
             </b>{" "}
             · Accountant:{" "}
             <b>
-              {data.assignment.accountant?.name ||
-                "Not assigned"}
+              {
+                data.assignment
+                  .accountant
+                  ?.name
+              }
             </b>{" "}
             (
-            {data.assignment.accountant
-              ?.branch ||
-              "Branch not specified"}
+            {
+              data.assignment
+                .accountant
+                ?.branch ||
+              "Branch not specified"
+            }
             )
           </p>
         )}
@@ -857,57 +1144,92 @@ function Dashboard({ user }) {
       <Metrics
         data={data}
         accountant={
-          user.role === "accountant"
+          user.role ===
+          "accountant"
         }
       />
 
-      {user.role === "accountant" && (
+      {user.role ===
+        "accountant" && (
         <section className="panel">
-          <h2>
-            Assigned clients
-          </h2>
+          <div className="section-heading">
+            <div>
+              <p className="eyebrow">
+                CLIENTS
+              </p>
 
-          <table>
-            <thead>
-              <tr>
-                <th>CLIENT</th>
-                <th>ORGANIZATION</th>
-                <th>DOCUMENTS</th>
-                <th>PENDING</th>
-              </tr>
-            </thead>
+              <h2>
+                Assigned clients
+              </h2>
+            </div>
 
-            <tbody>
-              {clientList.map((x) => (
-                <tr
-                  key={
-                    x._id ||
-                    x.id ||
-                    x.email
-                  }
-                >
-                  <td>
-                    {x.name ||
-                      x.email ||
-                      "Unknown"}
-                  </td>
+            <span className="count-badge">
+              {clientList.length}
+            </span>
+          </div>
 
-                  <td>
-                    {x.organization ||
-                      "—"}
-                  </td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>
+                    CLIENT
+                  </th>
 
-                  <td>
-                    {x.documents || 0}
-                  </td>
+                  <th>
+                    ORGANIZATION
+                  </th>
 
-                  <td>
-                    {x.pending || 0}
-                  </td>
+                  <th>
+                    DOCUMENTS
+                  </th>
+
+                  <th>
+                    PENDING
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+
+              <tbody>
+                {clientList.map(
+                  (x) => (
+                    <tr
+                      key={
+                        x._id ||
+                        x.id ||
+                        x.email
+                      }
+                    >
+                      <td>
+                        <b>
+                          {x.name ||
+                            x.email ||
+                            "Unknown"}
+                        </b>
+                      </td>
+
+                      <td>
+                        {x.organization ||
+                          "—"}
+                      </td>
+
+                      <td>
+                        {x.documents ||
+                          0}
+                      </td>
+
+                      <td>
+                        <span className="status pending">
+                          {x.pending ||
+                            0}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                )}
+              </tbody>
+            </table>
+          </div>
 
           {!clientList.length && (
             <p className="empty">
@@ -918,9 +1240,17 @@ function Dashboard({ user }) {
       )}
 
       <section className="panel">
-        <h2>
-          Recent documents
-        </h2>
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">
+              ACTIVITY
+            </p>
+
+            <h2>
+              Recent documents
+            </h2>
+          </div>
+        </div>
 
         <DocumentTable
           docs={recent}
@@ -947,32 +1277,61 @@ function Metrics({
 }) {
   const metrics = accountant
     ? [
-        ["Clients", data.clients],
-        ["Total documents", data.total],
-        ["Pending review", data.pending],
-        ["Approved", data.approved],
-        ["Rejected", data.rejected]
+        [
+          "Clients",
+          data.clients
+        ],
+        [
+          "Total documents",
+          data.total
+        ],
+        [
+          "Pending review",
+          data.pending
+        ],
+        [
+          "Approved",
+          data.approved
+        ],
+        [
+          "Rejected",
+          data.rejected
+        ]
       ]
     : [
-        ["Total documents", data.total],
-        ["Pending", data.pending],
-        ["Approved", data.approved],
-        ["Rejected", data.rejected]
+        [
+          "Total documents",
+          data.total
+        ],
+        [
+          "Pending",
+          data.pending
+        ],
+        [
+          "Approved",
+          data.approved
+        ],
+        [
+          "Rejected",
+          data.rejected
+        ]
       ];
 
   return (
     <div className="metrics">
-      {metrics.map(([label, value]) => (
-        <article key={label}>
-          <p>
-            {label}
-          </p>
+      {metrics.map(
+        ([label, value]) => (
+          <article
+            key={label}
+          >
+            <p>{label}</p>
 
-          <strong>
-            {value || 0}
-          </strong>
-        </article>
-      ))}
+            <strong>
+              {value ?? 0}
+            </strong>
+          </article>
+        )
+      )}
     </div>
   );
 }
@@ -981,9 +1340,15 @@ function Metrics({
    DOCUMENTS
 ========================================================= */
 
-function Documents({ user }) {
-  const [docs, setDocs] = useState([]);
-  const [error, setError] = useState("");
+function Documents({
+  user
+}) {
+  const [docs, setDocs] =
+    useState([]);
+
+  const [error, setError] =
+    useState("");
+
   const [loading, setLoading] =
     useState(true);
 
@@ -1038,11 +1403,17 @@ function Documents({ user }) {
     <>
       <PageTitle
         title={
-          user.role === "client"
+          user.role ===
+          "client"
             ? "My documents"
             : "Client documents"
         }
-        copy="Documents you are authorized to access."
+        copy={
+          user.role ===
+          "accountant"
+            ? "Review documents uploaded by your assigned clients."
+            : "Documents uploaded to your assigned accountant."
+        }
       />
 
       {error && (
@@ -1060,7 +1431,8 @@ function Documents({ user }) {
               docs={docs}
               user={user}
               onDelete={
-                user.role === "client"
+                user.role ===
+                "client"
                   ? remove
                   : null
               }
@@ -1087,114 +1459,138 @@ function DocumentTable({
   user,
   onDelete
 }) {
-  const nav = useNavigate();
+  const nav =
+    useNavigate();
 
   return (
-    <table>
-      <thead>
-        <tr>
-          <th>
-            DOCUMENT
-          </th>
-
-          {user.role === "accountant" && (
+    <div className="table-wrap">
+      <table>
+        <thead>
+          <tr>
             <th>
-              CLIENT
+              DOCUMENT
             </th>
-          )}
 
-          <th>
-            UPLOADED
-          </th>
-
-          <th>
-            OCR
-          </th>
-
-          <th>
-            STATUS
-          </th>
-
-          <th></th>
-        </tr>
-      </thead>
-
-      <tbody>
-        {docs.map((d) => (
-          <tr
-            key={d._id}
-            onClick={() =>
-              nav(
-                `/documents/${d._id}`
-              )
-            }
-            style={{
-              cursor: "pointer"
-            }}
-          >
-            <td>
-              <b>
-                {d.originalName ||
-                  d.invoiceNumber ||
-                  "Unnamed document"}
-              </b>
-
-              <small>
-                {d.vendor ||
-                  "No vendor extracted"}
-              </small>
-            </td>
-
-            {user.role === "accountant" && (
-              <td>
-                {d.client?.name ||
-                  d.client?.email ||
-                  "—"}
-              </td>
+            {user.role ===
+              "accountant" && (
+              <th>
+                CLIENT
+              </th>
             )}
 
-            <td>
-              {d.createdAt
-                ? new Date(
-                    d.createdAt
-                  ).toLocaleDateString()
-                : "—"}
-            </td>
+            <th>
+              TYPE
+            </th>
 
-            <td>
-              {d.ocrStatus ||
-                "—"}
-            </td>
+            <th>
+              UPLOADED
+            </th>
 
-            <td>
-              <span
-                className={`status ${
-                  d.status || ""
-                }`}
-              >
-                {d.status ||
-                  "Pending"}
-              </span>
-            </td>
+            <th>
+              OCR
+            </th>
 
-            <td>
-              {onDelete && (
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDelete(d._id);
-                  }}
-                >
-                  Delete
-                </button>
-              )}
-            </td>
+            <th>
+              STATUS
+            </th>
+
+            <th></th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+
+        <tbody>
+          {docs.map((d) => (
+            <tr
+              key={d._id}
+              onClick={() =>
+                nav(
+                  `/documents/${d._id}`
+                )
+              }
+              className="clickable-row"
+            >
+              <td>
+                <div className="document-name">
+                  <b>
+                    {d.originalName ||
+                      "Unnamed document"}
+                  </b>
+
+                  <small>
+                    {d.vendor ||
+                      d.documentType ||
+                      "Original document"}
+                  </small>
+                </div>
+              </td>
+
+              {user.role ===
+                "accountant" && (
+                <td>
+                  {d.client?.name ||
+                    d.client?.email ||
+                    "—"}
+                </td>
+              )}
+
+              <td>
+                {d.documentType ||
+                  "Not classified"}
+              </td>
+
+              <td>
+                {d.createdAt
+                  ? formatDate(
+                      d.createdAt
+                    )
+                  : "—"}
+              </td>
+
+              <td>
+                <span
+                  className={`ocr-badge ${
+                    d.ocrStatus ||
+                    "pending"
+                  }`}
+                >
+                  {d.ocrStatus ||
+                    "pending"}
+                </span>
+              </td>
+
+              <td>
+                <span
+                  className={`status ${
+                    d.status ||
+                    "pending"
+                  }`}
+                >
+                  {d.status ||
+                    "pending"}
+                </span>
+              </td>
+
+              <td>
+                {onDelete && (
+                  <button
+                    type="button"
+                    className="secondary small-button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDelete(
+                        d._id
+                      );
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -1206,16 +1602,55 @@ function Upload() {
   const [file, setFile] =
     useState(null);
 
-  const [type, setType] =
-    useState("Invoice");
-
   const [message, setMessage] =
     useState("");
 
   const [busy, setBusy] =
     useState(false);
 
+  const [dragging, setDragging] =
+    useState(false);
+
   const nav = useNavigate();
+
+  const selectFile = (selected) => {
+    if (!selected) {
+      setFile(null);
+      return;
+    }
+
+    const allowed = [
+      "application/pdf",
+      "image/png",
+      "image/jpeg"
+    ];
+
+    if (
+      !allowed.includes(
+        selected.type
+      )
+    ) {
+      setMessage(
+        "Only PDF, JPG and PNG files are allowed."
+      );
+      setFile(null);
+      return;
+    }
+
+    if (
+      selected.size >
+      20 * 1024 * 1024
+    ) {
+      setMessage(
+        "File size must be 20 MB or less."
+      );
+      setFile(null);
+      return;
+    }
+
+    setMessage("");
+    setFile(selected);
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -1239,10 +1674,17 @@ function Upload() {
         file
       );
 
-      formData.append(
-        "documentType",
-        type
-      );
+      /*
+        IMPORTANT:
+        No documentType is sent.
+
+        The client only uploads the
+        original document.
+
+        OCR + Gemini classification
+        happen later when the
+        accountant processes it.
+      */
 
       const data =
         await api(
@@ -1276,54 +1718,74 @@ function Upload() {
     <>
       <PageTitle
         title="Upload document"
-        copy="Your assigned accountant will review the AI extraction."
+        copy="Upload the original document. Your assigned accountant will process it with OCR and AI."
       />
 
       <form
         className="upload-form"
         onSubmit={submit}
       >
-        <label>
-          Document type
+        <div className="upload-info">
+          <div>
+            <b>
+              AI processing
+            </b>
 
-          <select
-            value={type}
-            onChange={(e) =>
-              setType(
-                e.target.value
-              )
-            }
-          >
-            {[
-              "Invoice",
-              "Receipt",
-              "Purchase document",
-              "Sales document",
-              "Statement"
-            ].map((x) => (
-              <option
-                value={x}
-                key={x}
-              >
-                {x}
-              </option>
-            ))}
-          </select>
-        </label>
+            <span>
+              OCR and document
+              classification are
+              performed by the
+              accountant after upload.
+            </span>
+          </div>
 
-        <label className="drop">
+          <div>
+            <b>
+              Supported files
+            </b>
+
+            <span>
+              PDF, JPG and PNG up to
+              20 MB
+            </span>
+          </div>
+        </div>
+
+        <label
+          className={`drop ${
+            dragging
+              ? "dragging"
+              : ""
+          }`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() =>
+            setDragging(false)
+          }
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragging(false);
+
+            selectFile(
+              e.dataTransfer
+                .files?.[0]
+            );
+          }}
+        >
           <input
             type="file"
             accept="application/pdf,image/png,image/jpeg"
             onChange={(e) =>
-              setFile(
+              selectFile(
                 e.target.files?.[0] ||
                   null
               )
             }
           />
 
-          <span>
+          <span className="upload-icon">
             ↑
           </span>
 
@@ -1333,16 +1795,23 @@ function Upload() {
           </b>
 
           <small>
-            Maximum 20 MB
+            {file
+              ? `${(
+                  file.size /
+                  (1024 * 1024)
+                ).toFixed(2)} MB`
+              : "Maximum 20 MB"}
           </small>
         </label>
 
         <button
           type="submit"
-          disabled={!file || busy}
+          disabled={
+            !file || busy
+          }
         >
           {busy
-            ? "Processing OCR and AI…"
+            ? "Uploading..."
             : "Upload document"}
         </button>
 
@@ -1360,7 +1829,9 @@ function Upload() {
    DOCUMENT DETAILS
 ========================================================= */
 
-function Details({ user }) {
+function Details({
+  user
+}) {
   const { id } =
     useParams();
 
@@ -1376,10 +1847,20 @@ function Details({ user }) {
   const [error, setError] =
     useState("");
 
-  const nav = useNavigate();
+  const [loading, setLoading] =
+    useState(true);
+
+  const [processing, setProcessing] =
+    useState(false);
+
+  const [processMessage, setProcessMessage] =
+    useState("");
 
   useEffect(() => {
     let active = true;
+
+    setLoading(true);
+    setError("");
 
     api("/documents")
       .then((documents) => {
@@ -1388,10 +1869,14 @@ function Details({ user }) {
         }
 
         const found =
-          Array.isArray(documents)
+          Array.isArray(
+            documents
+          )
             ? documents.find(
                 (x) =>
-                  x._id === id
+                  String(
+                    x._id
+                  ) === String(id)
               )
             : null;
 
@@ -1401,11 +1886,18 @@ function Details({ user }) {
           );
         }
 
-        setDoc(found || null);
+        setDoc(
+          found || null
+        );
       })
       .catch((e) => {
         if (active) {
           setError(e.message);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
         }
       });
 
@@ -1414,7 +1906,67 @@ function Details({ user }) {
     };
   }, [id]);
 
-  if (error) {
+  const refresh = async () => {
+    const documents =
+      await api(
+        "/documents"
+      );
+
+    const found =
+      Array.isArray(
+        documents
+      )
+        ? documents.find(
+            (x) =>
+              String(x._id) ===
+              String(id)
+          )
+        : null;
+
+    setDoc(found || null);
+  };
+
+  const processDocument =
+    async () => {
+      setProcessing(true);
+      setProcessMessage("");
+      setError("");
+
+      try {
+        const updated =
+          await api(
+            `/documents/${id}/process`,
+            {
+              method: "POST"
+            }
+          );
+
+        setDoc(updated);
+
+        setProcessMessage(
+          "OCR and AI processing completed successfully."
+        );
+      } catch (e) {
+        setError(
+          e.message ||
+            "Document processing failed."
+        );
+
+        try {
+          await refresh();
+        } catch {
+          // Ignore refresh failure.
+        }
+      } finally {
+        setProcessing(false);
+      }
+    };
+
+  if (loading) {
+    return <Loading />;
+  }
+
+  if (error && !doc) {
     return (
       <>
         <PageTitle
@@ -1430,27 +1982,51 @@ function Details({ user }) {
   }
 
   if (!doc) {
-    return <Loading />;
+    return (
+      <p className="error">
+        Document not found.
+      </p>
+    );
   }
 
-  const fields = [
-    ["Vendor", "vendor"],
-    ["Customer", "customer"],
-    [
-      "Invoice number",
-      "invoiceNumber"
-    ],
-    [
-      "Invoice date",
-      "invoiceDate"
-    ],
-    ["Subtotal", "subtotal"],
-    ["GST", "gst"],
-    ["Total", "total"],
-    ["GSTIN", "gstin"]
-  ];
+  const extractedFields =
+    doc.extractedFields &&
+    typeof doc.extractedFields ===
+      "object"
+      ? doc.extractedFields
+      : {};
 
-  const save = async (values) => {
+  const hasExtractedFields =
+    Object.keys(
+      extractedFields
+    ).length > 0;
+
+  const issues =
+    Array.isArray(
+      doc.issues
+    )
+      ? doc.issues
+      : Array.isArray(
+          doc.validationIssues
+        )
+      ? doc.validationIssues
+      : [];
+
+  const aiIssues =
+    Array.isArray(
+      doc.aiValidationIssues
+    )
+      ? doc.aiValidationIssues
+      : [];
+
+  const allIssues = [
+    ...issues,
+    ...aiIssues
+  ].filter(Boolean);
+
+  const save = async (
+    values
+  ) => {
     try {
       const updated =
         await api(
@@ -1474,7 +2050,9 @@ function Details({ user }) {
     }
   };
 
-  const act = async (status) => {
+  const act = async (
+    status
+  ) => {
     if (
       status === "rejected" &&
       !reason.trim()
@@ -1498,21 +2076,25 @@ function Details({ user }) {
             body: JSON.stringify({
               status,
               rejectionReason:
-                reason
+                reason.trim()
             })
           }
         );
 
       setDoc(updated);
+      setReason("");
 
-      nav(
+      if (
         status === "approved"
-          ? "/documents"
-          : "/review",
-        {
-          replace: true
-        }
-      );
+      ) {
+        alert(
+          "Document approved successfully."
+        );
+      } else {
+        alert(
+          "Document rejected successfully."
+        );
+      }
     } catch (e) {
       alert(e.message);
     }
@@ -1523,107 +2105,323 @@ function Details({ user }) {
       <PageTitle
         title="Document analysis"
         copy={`${doc.originalName || "Document"} · ${
-          doc.confidence ?? "—"
-        }% extraction confidence`}
+          doc.confidence !==
+            null &&
+          doc.confidence !==
+            undefined
+            ? `${(
+                Number(
+                  doc.confidence
+                ) <= 1
+                  ? Number(
+                      doc.confidence
+                    ) * 100
+                  : Number(
+                      doc.confidence
+                    )
+              ).toFixed(1)}% extraction confidence`
+            : "Confidence unavailable"
+        }`}
       />
 
+      {error && (
+        <p className="error">
+          {error}
+        </p>
+      )}
+
+      {processMessage && (
+        <p className="notice">
+          {processMessage}
+        </p>
+      )}
+
       <div className="detail-grid">
-        <section className="panel">
+        <section className="panel document-preview-panel">
           <p className="eyebrow">
+            ORIGINAL DOCUMENT
+          </p>
+
+          <h2>
+            {doc.originalName ||
+              "Uploaded document"}
+          </h2>
+
+          <OriginalDocument
+            document={doc}
+          />
+        </section>
+
+        <section className="panel">
+          <div className="detail-header">
+            <div>
+              <p className="eyebrow">
+                DOCUMENT
+              </p>
+
+              <h2>
+                {doc.documentType ||
+                  "Not classified"}
+              </h2>
+            </div>
+
+            <span
+              className={`status ${
+                doc.status ||
+                "pending"
+              }`}
+            >
+              {doc.status ||
+                "pending"}
+            </span>
+          </div>
+
+          <div className="document-meta">
+            <div>
+              <span>
+                OCR status
+              </span>
+
+              <b>
+                {doc.ocrStatus ||
+                  "pending"}
+              </b>
+            </div>
+
+            <div>
+              <span>
+                Uploaded
+              </span>
+
+              <b>
+                {formatDateTime(
+                  doc.createdAt
+                )}
+              </b>
+            </div>
+
+            {user.role ===
+              "accountant" && (
+              <div>
+                <span>
+                  Client
+                </span>
+
+                <b>
+                  {doc.client
+                    ?.name ||
+                    doc.client
+                      ?.email ||
+                    "—"}
+                </b>
+              </div>
+            )}
+          </div>
+
+          {user.role ===
+            "accountant" &&
+            (
+              doc.ocrStatus ===
+                "pending" ||
+              doc.status ===
+                "pending"
+            ) && (
+              <div className="process-box">
+                <div>
+                  <b>
+                    Ready for AI
+                    processing
+                  </b>
+
+                  <p>
+                    Process this original
+                    document to run OCR,
+                    classify its type and
+                    extract the fields
+                    automatically.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={
+                    processDocument
+                  }
+                  disabled={
+                    processing
+                  }
+                >
+                  {processing
+                    ? "Processing OCR + AI..."
+                    : "Process with AI"}
+                </button>
+              </div>
+            )}
+
+          <p className="eyebrow detail-eyebrow">
             EXTRACTED INFORMATION
           </p>
 
           {editing ? (
-            <EditForm
-              doc={doc}
-              fields={fields}
-              save={save}
+            <DynamicEditForm
+              fields={
+                extractedFields
+              }
+              save={async (
+                updatedFields
+              ) => {
+                await save({
+                  extractedFields:
+                    updatedFields
+                });
+              }}
               cancel={() =>
                 setEditing(false)
               }
             />
+          ) : hasExtractedFields ? (
+            <DynamicFields
+              fields={
+                extractedFields
+              }
+            />
           ) : (
-            fields.map(([label, key]) => (
-              <div
-                className="field"
-                key={key}
-              >
-                <span>
-                  {label}
-                </span>
+            <div className="empty extraction-empty">
+              <b>
+                No extracted fields yet
+              </b>
 
-                <b>
-                  {key ===
-                  "invoiceDate"
-                    ? doc[key]
-                      ? new Date(
-                          doc[key]
-                        ).toLocaleDateString()
-                      : "Not found"
-                    : [
-                        "subtotal",
-                        "gst",
-                        "total"
-                      ].includes(key)
-                    ? money(doc[key])
-                    : doc[key] ||
-                      "Not found"}
-                </b>
-              </div>
-            ))
+              <p>
+                {user.role ===
+                "accountant"
+                  ? "Click “Process with AI” to run OCR and extract the document data."
+                  : "Your accountant has not processed this document yet."}
+              </p>
+            </div>
           )}
+
+          {doc.items &&
+            Array.isArray(
+              doc.items
+            ) &&
+            doc.items.length > 0 && (
+              <ItemsTable
+                items={doc.items}
+              />
+            )}
         </section>
 
-        <section className="panel">
+        <section className="panel validation-panel">
           <p className="eyebrow">
             VALIDATION
           </p>
 
           <h2>
-            {doc.issues?.length
+            {allIssues.length
               ? "Issues found"
-              : "Ready for review"}
+              : doc.ocrStatus ===
+                  "completed"
+              ? "Ready for review"
+              : "Waiting for processing"}
           </h2>
 
-          <ul>
-            {doc.issues?.length ? (
-              doc.issues.map(
-                (issue, index) => (
-                  <li key={index}>
-                    ⚠ {issue}
+          {allIssues.length ? (
+            <ul className="issue-list">
+              {allIssues.map(
+                (
+                  issue,
+                  index
+                ) => (
+                  <li
+                    key={index}
+                  >
+                    <span>
+                      ⚠
+                    </span>
+
+                    {issue}
                   </li>
                 )
-              )
-            ) : (
-              <li>
-                ✓ AI validation completed
-              </li>
-            )}
-          </ul>
+              )}
+            </ul>
+          ) : (
+            <p className="success-message">
+              ✓ No validation issues
+              found.
+            </p>
+          )}
 
-          <p>
-            OCR:{" "}
-            <b>
-              {doc.ocrStatus ||
-                "Not processed"}
-            </b>
-          </p>
+          <div className="validation-meta">
+            <div>
+              <span>
+                OCR
+              </span>
+
+              <b>
+                {doc.ocrStatus ||
+                  "pending"}
+              </b>
+            </div>
+
+            <div>
+              <span>
+                AI confidence
+              </span>
+
+              <b>
+                {doc.confidence !==
+                  null &&
+                doc.confidence !==
+                  undefined
+                  ? `${
+                      Number(
+                        doc.confidence
+                      ) <= 1
+                        ? (
+                            Number(
+                              doc.confidence
+                            ) *
+                            100
+                          ).toFixed(
+                            1
+                          )
+                        : Number(
+                            doc.confidence
+                          ).toFixed(
+                            1
+                          )
+                    }%`
+                  : "—"}
+              </b>
+            </div>
+          </div>
 
           {user.role ===
             "accountant" && (
             <div className="actions">
-              <button
-                type="button"
-                className="secondary"
-                onClick={() =>
-                  setEditing(true)
-                }
-              >
-                Edit
-              </button>
+              {doc.ocrStatus ===
+                "completed" && (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() =>
+                    setEditing(
+                      true
+                    )
+                  }
+                >
+                  Edit extracted data
+                </button>
+              )}
 
               <button
                 type="button"
+                disabled={
+                  doc.status ===
+                    "approved" ||
+                  doc.ocrStatus !==
+                    "completed"
+                }
                 onClick={() =>
                   act("approved")
                 }
@@ -1639,11 +2437,21 @@ function Details({ user }) {
                     e.target.value
                   )
                 }
+                disabled={
+                  doc.status ===
+                  "approved"
+                }
               />
 
               <button
                 type="button"
                 className="danger"
+                disabled={
+                  doc.status ===
+                    "approved" ||
+                  doc.ocrStatus !==
+                    "completed"
+                }
                 onClick={() =>
                   act("rejected")
                 }
@@ -1653,16 +2461,31 @@ function Details({ user }) {
             </div>
           )}
 
-          <details>
-            <summary>
-              View OCR text
-            </summary>
+          {doc.rejectionReason && (
+            <div className="rejection-box">
+              <b>
+                Rejection reason
+              </b>
 
-            <pre>
-              {doc.rawText ||
-                "No OCR text available."}
-            </pre>
-          </details>
+              <p>
+                {
+                  doc.rejectionReason
+                }
+              </p>
+            </div>
+          )}
+
+          {doc.rawText && (
+            <details>
+              <summary>
+                View OCR text
+              </summary>
+
+              <pre>
+                {doc.rawText}
+              </pre>
+            </details>
+          )}
         </section>
       </div>
     </>
@@ -1670,33 +2493,267 @@ function Details({ user }) {
 }
 
 /* =========================================================
-   EDIT FORM
+   ORIGINAL DOCUMENT VIEWER
 ========================================================= */
 
-function EditForm({
-  doc,
-  fields,
+function OriginalDocument({
+  document
+}) {
+  const [url, setUrl] =
+    useState("");
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [error, setError] =
+    useState("");
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = null;
+
+    const loadFile =
+      async () => {
+        setLoading(true);
+        setError("");
+
+        try {
+          const token =
+            localStorage.getItem(
+              "token"
+            );
+
+          const response =
+            await fetch(
+              `${API}/documents/${document._id}/file`,
+              {
+                headers: {
+                  Authorization: `Bearer ${token}`
+                }
+              }
+            );
+
+          if (
+            !response.ok
+          ) {
+            let message =
+              "Unable to load original document.";
+
+            try {
+              const body =
+                await response.json();
+
+              message =
+                body?.message ||
+                message;
+            } catch {
+              // Ignore invalid JSON.
+            }
+
+            throw new Error(
+              message
+            );
+          }
+
+          const blob =
+            await response.blob();
+
+          objectUrl =
+            URL.createObjectURL(
+              blob
+            );
+
+          if (active) {
+            setUrl(
+              objectUrl
+            );
+          }
+        } catch (e) {
+          if (active) {
+            setError(
+              e.message
+            );
+          }
+        } finally {
+          if (active) {
+            setLoading(
+              false
+            );
+          }
+        }
+      };
+
+    loadFile();
+
+    return () => {
+      active = false;
+
+      if (objectUrl) {
+        URL.revokeObjectURL(
+          objectUrl
+        );
+      }
+    };
+  }, [document._id]);
+
+  if (loading) {
+    return (
+      <div className="document-viewer-loading">
+        Loading original document...
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="document-viewer-error">
+        <p className="error">
+          {error}
+        </p>
+      </div>
+    );
+  }
+
+  if (!url) {
+    return (
+      <p className="empty">
+        Original document is
+        unavailable.
+      </p>
+    );
+  }
+
+  const isPdf =
+    document.mimeType ===
+      "application/pdf" ||
+    document.originalName
+      ?.toLowerCase()
+      .endsWith(".pdf");
+
+  const isImage =
+    document.mimeType?.startsWith(
+      "image/"
+    ) ||
+    /\.(png|jpg|jpeg)$/i.test(
+      document.originalName ||
+        ""
+    );
+
+  return (
+    <div className="document-viewer">
+      {isPdf && (
+        <iframe
+          src={url}
+          title="Original document"
+        />
+      )}
+
+      {isImage && (
+        <img
+          src={url}
+          alt={
+            document.originalName ||
+            "Original document"
+          }
+        />
+      )}
+
+      {!isPdf && !isImage && (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="document-open-link"
+        >
+          Open original document
+        </a>
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   DYNAMIC FIELDS
+========================================================= */
+
+function DynamicFields({
+  fields = {}
+}) {
+  const entries =
+    Object.entries(fields);
+
+  if (!entries.length) {
+    return (
+      <p className="empty">
+        No extracted information.
+      </p>
+    );
+  }
+
+  return (
+    <div className="dynamic-fields">
+      {entries.map(
+        ([key, value]) => (
+          <div
+            className="field"
+            key={key}
+          >
+            <span>
+              {prettyKey(key)}
+            </span>
+
+            <b>
+              {formatFieldValue(
+                key,
+                value
+              )}
+            </b>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+/* =========================================================
+   DYNAMIC EDIT FORM
+========================================================= */
+
+function DynamicEditForm({
+  fields = {},
   save,
   cancel
 }) {
-  const [values, setValues] =
-    useState(() =>
-      Object.fromEntries(
-        fields.map(
-          ([, key]) => [
-            key,
-            key === "invoiceDate" &&
-            doc[key]
-              ? new Date(
-                  doc[key]
-                )
-                  .toISOString()
-                  .slice(0, 10)
-              : doc[key] ?? ""
-          ]
-        )
+  const initial =
+    Object.fromEntries(
+      Object.entries(
+        fields
+      ).map(
+        ([key, value]) => [
+          key,
+          typeof value ===
+          "object"
+            ? JSON.stringify(
+                value
+              )
+            : value ??
+              ""
+        ]
       )
     );
+
+  const [
+    values,
+    setValues
+  ] = useState(initial);
+
+  const [newKey, setNewKey] =
+    useState("");
+
+  const [
+    newValue,
+    setNewValue
+  ] = useState("");
 
   const updateValue = (
     key,
@@ -1710,45 +2767,164 @@ function EditForm({
     );
   };
 
+  const addField = () => {
+    const key =
+      newKey.trim();
+
+    if (!key) {
+      return;
+    }
+
+    setValues(
+      (previous) => ({
+        ...previous,
+        [key]:
+          newValue
+      })
+    );
+
+    setNewKey("");
+    setNewValue("");
+  };
+
+  const removeField = (
+    key
+  ) => {
+    setValues(
+      (previous) => {
+        const next = {
+          ...previous
+        };
+
+        delete next[key];
+
+        return next;
+      }
+    );
+  };
+
+  const submit = (
+    e
+  ) => {
+    e.preventDefault();
+
+    const cleaned =
+      Object.fromEntries(
+        Object.entries(
+          values
+        ).map(
+          ([key, value]) => {
+            let parsed =
+              value;
+
+            if (
+              typeof value ===
+                "string" &&
+              (
+                value.trim()
+                  .startsWith(
+                    "{"
+                  ) ||
+                value.trim()
+                  .startsWith(
+                    "["
+                  )
+              )
+            ) {
+              try {
+                parsed =
+                  JSON.parse(
+                    value
+                  );
+              } catch {
+                parsed =
+                  value;
+              }
+            }
+
+            return [
+              key,
+              parsed
+            ];
+          }
+        )
+      );
+
+    save(cleaned);
+  };
+
   return (
     <form
       className="edit-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        save(values);
-      }}
+      onSubmit={submit}
     >
-      {fields.map(
-        ([label, key]) => (
-          <label key={key}>
-            {label}
+      {Object.entries(
+        values
+      ).map(
+        ([key, value]) => (
+          <div
+            className="dynamic-edit-row"
+            key={key}
+          >
+            <label>
+              {prettyKey(key)}
 
-            <input
-              type={
-                [
-                  "subtotal",
-                  "gst",
-                  "total"
-                ].includes(key)
-                  ? "number"
-                  : key ===
-                    "invoiceDate"
-                  ? "date"
-                  : "text"
-              }
-              value={
-                values[key]
-              }
-              onChange={(e) =>
-                updateValue(
-                  key,
-                  e.target.value
+              <input
+                value={value}
+                onChange={(e) =>
+                  updateValue(
+                    key,
+                    e.target
+                      .value
+                  )
+                }
+              />
+            </label>
+
+            <button
+              type="button"
+              className="danger small-button"
+              onClick={() =>
+                removeField(
+                  key
                 )
               }
-            />
-          </label>
+            >
+              Remove
+            </button>
+          </div>
         )
       )}
+
+      <div className="add-field">
+        <input
+          placeholder="New field name"
+          value={newKey}
+          onChange={(e) =>
+            setNewKey(
+              e.target.value
+            )
+          }
+        />
+
+        <input
+          placeholder="Value"
+          value={newValue}
+          onChange={(e) =>
+            setNewValue(
+              e.target.value
+            )
+          }
+        />
+
+        <button
+          type="button"
+          className="secondary"
+          onClick={addField}
+        >
+          Add field
+        </button>
+      </div>
 
       <div className="actions">
         <button
@@ -1768,6 +2944,95 @@ function EditForm({
 }
 
 /* =========================================================
+   ITEMS TABLE
+========================================================= */
+
+function ItemsTable({
+  items = []
+}) {
+  if (!items.length) {
+    return null;
+  }
+
+  return (
+    <div className="items-section">
+      <p className="eyebrow">
+        LINE ITEMS
+      </p>
+
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>
+                ITEM
+              </th>
+
+              <th>
+                QUANTITY
+              </th>
+
+              <th>
+                UNIT PRICE
+              </th>
+
+              <th>
+                AMOUNT
+              </th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {items.map(
+              (item, index) => (
+                <tr
+                  key={
+                    item.id ||
+                    index
+                  }
+                >
+                  <td>
+                    {item.name ||
+                      "—"}
+                  </td>
+
+                  <td>
+                    {item.quantity ??
+                      "—"}
+                  </td>
+
+                  <td>
+                    {item.unitPrice !==
+                      null &&
+                    item.unitPrice !==
+                      undefined
+                      ? money(
+                          item.unitPrice
+                        )
+                      : "—"}
+                  </td>
+
+                  <td>
+                    {item.amount !==
+                      null &&
+                    item.amount !==
+                      undefined
+                      ? money(
+                          item.amount
+                        )
+                      : "—"}
+                  </td>
+                </tr>
+              )
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
    REVIEW QUEUE
 ========================================================= */
 
@@ -1778,46 +3043,41 @@ function Review() {
   const [error, setError] =
     useState("");
 
+  const load = async () => {
+    try {
+      const data =
+        await api("/documents");
+
+      const documents =
+        Array.isArray(data)
+          ? data
+          : [];
+
+      setDocs(
+        documents.filter(
+          (document) =>
+            document.status ===
+              "review" ||
+            document.status ===
+              "pending" ||
+            document.status ===
+              "processing"
+        )
+      );
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
   useEffect(() => {
-    let active = true;
-
-    api("/documents")
-      .then((data) => {
-        if (!active) {
-          return;
-        }
-
-        const documents =
-          Array.isArray(data)
-            ? data
-            : [];
-
-        setDocs(
-          documents.filter(
-            (document) =>
-              document.status ===
-                "review" ||
-              document.status ===
-                "pending"
-          )
-        );
-      })
-      .catch((e) => {
-        if (active) {
-          setError(e.message);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
+    load();
   }, []);
 
   return (
     <>
       <PageTitle
         title="Review queue"
-        copy="Open a document to edit, approve, or reject it."
+        copy="Process client documents, inspect the original file, review extracted data and approve or reject."
       />
 
       {error && (
@@ -1838,7 +3098,8 @@ function Review() {
 
             {!docs.length && (
               <p className="empty">
-                No documents waiting for review.
+                No documents waiting
+                for review.
               </p>
             )}
           </>
@@ -1854,7 +3115,9 @@ function Review() {
    REPORTS
 ========================================================= */
 
-function Reports() {
+function Reports({
+  user
+}) {
   const [report, setReport] =
     useState(null);
 
@@ -1906,37 +3169,70 @@ function Reports() {
   const activity =
     report.activity || {};
 
+  const documentTypes =
+    report.documentTypes ||
+    {};
+
   const statusValues =
     Object.values(status)
       .map(Number)
       .filter(
         (value) =>
-          !Number.isNaN(value)
+          !Number.isNaN(
+            value
+          )
       );
 
-  const maxStatus = Math.max(
-    ...statusValues,
-    1
-  );
+  const maxStatus =
+    Math.max(
+      ...statusValues,
+      1
+    );
 
   const activityValues =
     Object.values(activity)
       .map(Number)
       .filter(
         (value) =>
-          !Number.isNaN(value)
+          !Number.isNaN(
+            value
+          )
       );
 
-  const maxActivity = Math.max(
-    ...activityValues,
-    1
-  );
+  const maxActivity =
+    Math.max(
+      ...activityValues,
+      1
+    );
+
+  const typeValues =
+    Object.values(
+      documentTypes
+    )
+      .map(Number)
+      .filter(
+        (value) =>
+          !Number.isNaN(
+            value
+          )
+      );
+
+  const maxType =
+    Math.max(
+      ...typeValues,
+      1
+    );
 
   return (
     <>
       <PageTitle
         title="Reports"
-        copy="Live document activity from your workspace."
+        copy={
+          user?.role ===
+          "accountant"
+            ? "Overview of documents handled across your assigned clients."
+            : "Overview of your uploaded documents."
+        }
       />
 
       <Metrics
@@ -1944,29 +3240,45 @@ function Reports() {
       />
 
       <section className="panel">
-        <h2>
-          Documents by status
-        </h2>
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">
+              STATUS
+            </p>
 
-        {Object.entries(status).map(
+            <h2>
+              Documents by status
+            </h2>
+          </div>
+        </div>
+
+        {Object.entries(
+          status
+        ).map(
           ([key, value]) => (
             <div
               className="chart-row"
               key={key}
             >
               <span>
-                {key}
+                {prettyKey(
+                  key
+                )}
               </span>
 
-              <i
-                style={{
-                  width: `${
-                    (Number(value) /
-                      maxStatus) *
-                    100
-                  }%`
-                }}
-              />
+              <div className="chart-track">
+                <i
+                  style={{
+                    width: `${
+                      (Number(
+                        value
+                      ) /
+                        maxStatus) *
+                      100
+                    }%`
+                  }}
+                />
+              </div>
 
               <b>
                 {value}
@@ -1975,8 +3287,9 @@ function Reports() {
           )
         )}
 
-        {!Object.keys(status)
-          .length && (
+        {!Object.keys(
+          status
+        ).length && (
           <p className="empty">
             No status data available.
           </p>
@@ -1984,42 +3297,120 @@ function Reports() {
       </section>
 
       <section className="panel">
-        <h2>
-          Upload activity
-        </h2>
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">
+              CLASSIFICATION
+            </p>
 
-        {Object.entries(activity)
-          .sort(([a], [b]) =>
-            a.localeCompare(b)
-          )
-          .slice(-8)
-          .map(([date, value]) => (
+            <h2>
+              Documents by type
+            </h2>
+          </div>
+        </div>
+
+        {Object.entries(
+          documentTypes
+        ).map(
+          ([key, value]) => (
             <div
               className="chart-row"
-              key={date}
+              key={key}
             >
               <span>
-                {date}
+                {prettyKey(
+                  key
+                )}
               </span>
 
-              <i
-                style={{
-                  width: `${
-                    (Number(value) /
-                      maxActivity) *
-                    100
-                  }%`
-                }}
-              />
+              <div className="chart-track">
+                <i
+                  style={{
+                    width: `${
+                      (Number(
+                        value
+                      ) /
+                        maxType) *
+                      100
+                    }%`
+                  }}
+                />
+              </div>
 
               <b>
                 {value}
               </b>
             </div>
-          ))}
+          )
+        )}
 
-        {!Object.keys(activity)
-          .length && (
+        {!Object.keys(
+          documentTypes
+        ).length && (
+          <p className="empty">
+            No classified documents
+            yet.
+          </p>
+        )}
+      </section>
+
+      <section className="panel">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">
+              ACTIVITY
+            </p>
+
+            <h2>
+              Upload activity
+            </h2>
+          </div>
+        </div>
+
+        {Object.entries(
+          activity
+        )
+          .sort(
+            ([a], [b]) =>
+              a.localeCompare(
+                b
+              )
+          )
+          .slice(-8)
+          .map(
+            ([date, value]) => (
+              <div
+                className="chart-row"
+                key={date}
+              >
+                <span>
+                  {date}
+                </span>
+
+                <div className="chart-track">
+                  <i
+                    style={{
+                      width: `${
+                        (Number(
+                          value
+                        ) /
+                          maxActivity) *
+                        100
+                      }%`
+                    }}
+                  />
+                </div>
+
+                <b>
+                  {value}
+                </b>
+              </div>
+            )
+          )}
+
+        {!Object.keys(
+          activity
+        ).length && (
           <p className="empty">
             No upload activity yet.
           </p>
@@ -2030,156 +3421,7 @@ function Reports() {
 }
 
 /* =========================================================
-   CHANGE ACCOUNTANT
-========================================================= */
-
-function ChangeRequest() {
-  const [orgs, setOrgs] =
-    useState([]);
-
-  const [org, setOrg] =
-    useState("");
-
-  const [reason, setReason] =
-    useState("");
-
-  const [message, setMessage] =
-    useState("");
-
-  const [error, setError] =
-    useState("");
-
-  const [busy, setBusy] =
-    useState(false);
-
-  useEffect(() => {
-    api("/organizations")
-      .then((data) => {
-        setOrgs(
-          Array.isArray(data)
-            ? data
-            : []
-        );
-      })
-      .catch((e) => {
-        setError(e.message);
-      });
-  }, []);
-
-  const submit = async (e) => {
-    e.preventDefault();
-
-    setBusy(true);
-    setMessage("");
-    setError("");
-
-    try {
-      await api(
-        "/client/accountant-change-requests",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type":
-              "application/json"
-          },
-          body: JSON.stringify({
-            requestedOrganization:
-              org,
-            reason
-          })
-        }
-      );
-
-      setMessage(
-        "Request submitted to the organization."
-      );
-
-      setReason("");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <>
-      <PageTitle
-        title="Request accountant change"
-        copy="Your accountant will not change until the organization approves this request."
-      />
-
-      <form
-        className="upload-form"
-        onSubmit={submit}
-      >
-        <label>
-          Requested organization
-
-          <select
-            required
-            value={org}
-            onChange={(e) =>
-              setOrg(
-                e.target.value
-              )
-            }
-          >
-            <option value="">
-              Select organization
-            </option>
-
-            {orgs.map((x) => (
-              <option
-                value={x.name}
-                key={x._id || x.name}
-              >
-                {x.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Reason (optional)
-
-          <input
-            value={reason}
-            onChange={(e) =>
-              setReason(
-                e.target.value
-              )
-            }
-          />
-        </label>
-
-        <button
-          type="submit"
-          disabled={busy}
-        >
-          {busy
-            ? "Submitting..."
-            : "Submit request"}
-        </button>
-
-        {message && (
-          <p className="notice">
-            {message}
-          </p>
-        )}
-
-        {error && (
-          <p className="error">
-            {error}
-          </p>
-        )}
-      </form>
-    </>
-  );
-}
-
-/* =========================================================
-   COMMON COMPONENTS
+   PAGE TITLE
 ========================================================= */
 
 function PageTitle({
@@ -2203,11 +3445,16 @@ function PageTitle({
   );
 }
 
+/* =========================================================
+   LOADING
+========================================================= */
+
 function Loading() {
   return (
-    <p className="loading">
-      Loading…
-    </p>
+    <div className="loading">
+      <span className="spinner" />
+      Loading...
+    </div>
   );
 }
 
@@ -2216,59 +3463,83 @@ function Loading() {
 ========================================================= */
 
 function App() {
-  const [state, setState] =
-    useState(() => {
-      const token =
+  const [
+    state,
+    setState
+  ] = useState(() => {
+    const token =
+      localStorage.getItem(
+        "token"
+      );
+
+    let user = null;
+
+    try {
+      const storedUser =
         localStorage.getItem(
-          "token"
-        );
-
-      let user = null;
-
-      try {
-        const storedUser =
-          localStorage.getItem(
-            "user"
-          );
-
-        user = storedUser
-          ? JSON.parse(storedUser)
-          : null;
-      } catch {
-        localStorage.removeItem(
           "user"
         );
-        user = null;
-      }
 
-      /*
-        If the saved user doesn't contain
-        a role, don't allow the application
-        to enter the protected shell.
-      */
+      user =
+        storedUser
+          ? normalizeUser(
+              JSON.parse(
+                storedUser
+              )
+            )
+          : null;
+    } catch {
+      localStorage.removeItem(
+        "user"
+      );
 
-      if (
-        user &&
-        !user.role
-      ) {
-        user = null;
-      }
+      user = null;
+    }
+
+    /*
+      If a token exists but the
+      stored user is invalid,
+      remove the broken session.
+    */
+
+    if (
+      token &&
+      (!user || !user.role)
+    ) {
+      localStorage.removeItem(
+        "token"
+      );
+
+      localStorage.removeItem(
+        "user"
+      );
 
       return {
-        token,
-        user
+        token: null,
+        user: null
       };
-    });
+    }
 
-  const onAuth = (data) => {
+    return {
+      token,
+      user
+    };
+  });
+
+  const onAuth = (
+    data
+  ) => {
     const token =
-      data?.token || null;
+      data?.token ||
+      null;
 
     const user =
-      data?.user ||
-      data?.data?.user ||
-      data?.data ||
-      null;
+      normalizeUser(
+        data?.user ||
+          data?.data?.user ||
+          data?.data ||
+          null
+      );
 
     if (!token || !user) {
       throw new Error(
@@ -2313,7 +3584,8 @@ function App() {
         path="/auth"
         element={
           state.token &&
-          state.user ? (
+          state.user &&
+          state.user.role ? (
             <Navigate
               to="/dashboard"
               replace
@@ -2334,7 +3606,9 @@ function App() {
           state.user.role ? (
             <Shell
               user={state.user}
-              onLogout={logout}
+              onLogout={
+                logout
+              }
             />
           ) : (
             <Navigate
@@ -2353,7 +3627,9 @@ function App() {
 ========================================================= */
 
 createRoot(
-  document.getElementById("root")
+  document.getElementById(
+    "root"
+  )
 ).render(
   <React.StrictMode>
     <BrowserRouter>

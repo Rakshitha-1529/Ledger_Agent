@@ -1,15 +1,258 @@
 import mongoose from 'mongoose';
-const { Schema } = mongoose;
 
-const userSchema = new Schema({
-  name: { type: String, trim: true }, email: { type: String, required: true, unique: true, lowercase: true, trim: true }, password: { type: String, required: true },
-  role: { type: String, enum: ['client', 'accountant'], required: true, default: 'accountant' }, organization: { type: String, trim: true }, branch: { type: String, trim: true }, accountantId: { type: String, trim: true }, assignedAccountant: { type: Schema.Types.ObjectId, ref: 'User', default: null }
-}, { timestamps: true });
-const documentSchema = new Schema({
-  owner: { type: Schema.Types.ObjectId, ref: 'User', required: true }, client: { type: Schema.Types.ObjectId, ref: 'User' }, accountant: { type: Schema.Types.ObjectId, ref: 'User' }, organization: String,
-  originalName: String, fileName: String, mimeType: String, documentType: String, vendor: String, customer: String, invoiceNumber: String, invoiceDate: Date, subtotal: { type: Number, default: 0 }, gst: { type: Number, default: 0 }, total: { type: Number, default: 0 }, currency: String, items: [{ name: String, quantity: Number, unitPrice: Number, amount: Number }], gstin: String, confidence: { type: Number, default: 0 }, rawText: String,
-  status: { type: String, enum: ['pending', 'processing', 'review', 'approved', 'rejected'], default: 'pending' }, issues: [String], rejectionReason: String, isDuplicate: { type: Boolean, default: false }, ocrStatus: { type: String, enum: ['pending', 'completed', 'failed'], default: 'pending' }
-}, { timestamps: true });
-const organizationSchema = new Schema({ name: { type: String, required: true, unique: true, trim: true } }, { timestamps: true });
-const changeRequestSchema = new Schema({ client: { type: Schema.Types.ObjectId, ref: 'User', required: true }, currentAccountant: { type: Schema.Types.ObjectId, ref: 'User' }, requestedOrganization: { type: String, required: true }, reason: String, status: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' } }, { timestamps: true });
-export const User = mongoose.model('User', userSchema); export const Document = mongoose.model('Document', documentSchema); export const Organization = mongoose.model('Organization', organizationSchema); export const AccountantChangeRequest = mongoose.model('AccountantChangeRequest', changeRequestSchema);
+const userSchema = new mongoose.Schema(
+  {
+    role: {
+      type: String,
+      enum: ['client', 'accountant'],
+      required: true
+    },
+
+    name: {
+      type: String,
+      default: ''
+    },
+
+    email: {
+      type: String,
+      required: true,
+      unique: true,
+      lowercase: true,
+      trim: true
+    },
+
+    password: {
+      type: String,
+      required: true
+    },
+
+    organization: {
+      type: String,
+      default: ''
+    },
+
+    branch: {
+      type: String,
+      default: ''
+    },
+
+    accountantId: {
+      type: String,
+      default: ''
+    },
+
+    assignedAccountant: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null
+    }
+  },
+  {
+    timestamps: true
+  }
+);
+
+const organizationSchema = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true
+    }
+  },
+  {
+    timestamps: true
+  }
+);
+
+const documentSchema = new mongoose.Schema(
+  {
+    owner: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+
+    client: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+
+    accountant: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+
+    organization: {
+      type: String,
+      required: true
+    },
+
+    originalName: {
+      type: String,
+      required: true
+    },
+
+    fileName: {
+      type: String,
+      required: true
+    },
+
+    mimeType: {
+      type: String,
+      required: true
+    },
+
+    documentType: {
+      type: String,
+      default: null
+    },
+
+    /*
+      Dynamic fields returned by Gemini.
+
+      Example invoice:
+      {
+        vendor: "ABC Traders",
+        invoiceNumber: "INV-1001",
+        gstin: "37ABCDE1234F1Z5",
+        total: 1200
+      }
+
+      Example receipt:
+      {
+        merchant: "ABC Store",
+        paymentMethod: "UPI",
+        total: 500
+      }
+    */
+    extractedFields: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {}
+    },
+
+    /*
+      Kept for compatibility with older frontend code.
+    */
+    vendor: {
+      type: String,
+      default: null
+    },
+
+    customer: {
+      type: String,
+      default: null
+    },
+
+    invoiceNumber: {
+      type: String,
+      default: null
+    },
+
+    invoiceDate: {
+      type: String,
+      default: null
+    },
+
+    subtotal: {
+      type: Number,
+      default: null
+    },
+
+    gst: {
+      type: Number,
+      default: null
+    },
+
+    total: {
+      type: Number,
+      default: null
+    },
+
+    gstin: {
+      type: String,
+      default: null
+    },
+
+    confidence: {
+      type: Number,
+      default: 0
+    },
+
+    validationIssues: {
+      type: [String],
+      default: []
+    },
+
+    rawText: {
+      type: String,
+      default: ''
+    },
+
+    ocrStatus: {
+      type: String,
+      enum: [
+        'pending',
+        'processing',
+        'completed',
+        'failed'
+      ],
+      default: 'pending'
+    },
+
+    status: {
+      type: String,
+      enum: [
+        'pending',
+        'processing',
+        'review',
+        'approved',
+        'rejected',
+        'failed'
+      ],
+      default: 'pending'
+    },
+
+    processingError: {
+      type: String,
+      default: ''
+    },
+
+    rejectionReason: {
+      type: String,
+      default: ''
+    },
+
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null
+    },
+
+    reviewedAt: {
+      type: Date,
+      default: null
+    }
+  },
+  {
+    timestamps: true
+  }
+);
+
+export const User = mongoose.model(
+  'User',
+  userSchema
+);
+
+export const Organization = mongoose.model(
+  'Organization',
+  organizationSchema
+);
+
+export const Document = mongoose.model(
+  'Document',
+  documentSchema
+);

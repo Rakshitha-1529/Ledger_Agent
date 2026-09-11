@@ -1,14 +1,343 @@
 import fs from 'fs/promises';
-import pdf from 'pdf-parse';
+import pdfParse from 'pdf-parse';
 import Tesseract from 'tesseract.js';
-import { extractWithGemini } from './gemini.js';
 
-const clean = value => (value || '').replace(/\s+/g, ' ').trim();
-const number = value => Number(String(value || '').replace(/[^0-9.-]/g, '')) || 0;
-const capture = (text, regex) => clean(text.match(regex)?.[1]);
-async function extractText(file) { const data=await fs.readFile(file.path); if(file.mimetype==='application/pdf'){const result=await pdf(data);if(clean(result.text).length<20)throw new Error('This is a scanned PDF. Please upload it as JPG or PNG for local OCR.');return {text:result.text,confidence:99};} const {data:ocr}=await Tesseract.recognize(data,'eng');if(!clean(ocr.text))throw new Error('OCR could not detect readable text in this image.');return {text:ocr.text,confidence:Math.round(ocr.confidence)}; }
-function amountAfter(text, labels) {for(const label of labels){const found=text.match(new RegExp(`${label}[^\\d]{0,30}(?:₹|Rs\\.?|INR)?\\s*([0-9][0-9,]*(?:\\.\\d{1,2})?)`,'i'));if(found)return number(found[1]);}return 0;}
-function categoryFor(text,type){const s=text.toLowerCase();if(/aws|azure|google cloud|hosting|saas|subscription/.test(s))return 'Cloud Services';if(/dell|laptop|computer|monitor|equipment/.test(s))return 'Computer Equipment';if(/flight|airlines|hotel|travel|uber|ola/.test(s))return 'Travel';if(/stationery|office supplies|printer|paper/.test(s))return 'Office Supplies';if(/rent|lease/.test(s))return 'Rent expense';if(type==='Sales document')return 'Sales';return 'Uncategorised';}
-function parseLocally(text,type){const lines=text.split(/\r?\n/).map(clean).filter(Boolean);const invoiceNumber=capture(text,/(?:invoice\s*(?:no\.?|number|#)?|inv\.?\s*no\.?)\s*[:#-]?\s*([A-Z0-9][A-Z0-9\/-]{2,})/i)||capture(text,/\b(INV[-/]?\d{3,})\b/i);const dateText=capture(text,/(?:invoice\s*)?date\s*[:#-]?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})/i);const invoiceDate=dateText&&!Number.isNaN(Date.parse(dateText))?new Date(dateText):null;const gstin=capture(text,/GSTIN\s*(?:No\.?)?\s*[:#-]?\s*([0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[A-Z0-9])/i);const total=amountAfter(text,['grand total','invoice total','total amount','amount payable','net amount','total']);const gst=amountAfter(text,['total gst','igst','tax amount','gst']);const subtotal=amountAfter(text,['sub total','subtotal','taxable value','amount before tax'])||Math.max(0,total-gst);const vendor=capture(text,/(?:vendor|supplier|seller|from)\s*[:#-]?\s*([^\n]{2,80})/i)||lines.find(x=>!/invoice|tax|gstin|bill to|ship to|date|original|duplicate/i.test(x)&&/[A-Za-z]{3}/.test(x))||'';return {vendor:clean(vendor).slice(0,100),invoiceNumber,invoiceDate,subtotal,gst,total,gstin,category:categoryFor(text,type)};}
-export async function analyseDocument(file,type){const ocr=await extractText(file);const buffer=await fs.readFile(file.path);const gemini=await extractWithGemini(ocr.text,{mimeType:file.mimetype,buffer});return {documentType:gemini.documentType?.replace('_',' ')||type,vendor:gemini.vendor||'',customer:gemini.customer||'',invoiceNumber:gemini.invoiceNumber||'',invoiceDate:gemini.date?new Date(gemini.date):null,subtotal:number(gemini.subtotal),gst:number(gemini.gst),total:number(gemini.total),gstin:gemini.gstin||'',currency:gemini.currency||'INR',items:Array.isArray(gemini.items)?gemini.items:[],confidence:Math.round(Number(gemini.confidence||0)*100),rawText:ocr.text,aiValidationIssues:Array.isArray(gemini.validationIssues)?gemini.validationIssues:[]};}
-export function validate(data,existing){const issues=[...(data.aiValidationIssues||[])];if(!data.vendor)issues.push('Vendor could not be extracted');if(!data.invoiceNumber)issues.push('Invoice number could not be extracted');if(!data.invoiceDate)issues.push('Invoice date could not be extracted');if(!data.total)issues.push('Total amount could not be extracted');if(!data.gstin)issues.push('GSTIN missing');if(data.total&&data.subtotal&&data.gst&&Math.abs(data.subtotal+data.gst-data.total)>1)issues.push('Total does not match subtotal + GST');const duplicate=existing.some(d=>(d.invoiceNumber&&d.invoiceNumber===data.invoiceNumber)||(data.vendor&&d.vendor?.toLowerCase()===data.vendor.toLowerCase()&&d.total===data.total));if(duplicate)issues.push('Possible duplicate document');return {issues:[...new Set(issues)],isDuplicate:duplicate};}
+import {
+  extractWithGemini
+} from './gemini.js';
+
+
+async function extractText(file) {
+  const buffer = await fs.readFile(file.path);
+
+  /*
+    PDF
+  */
+  if (file.mimetype === 'application/pdf') {
+    const result = await pdfParse(buffer);
+
+    const text = result.text?.trim();
+
+    if (!text) {
+      throw new Error(
+        'The PDF does not contain readable text. Please upload a text-based PDF or JPG/PNG image.'
+      );
+    }
+
+    return text;
+  }
+
+  /*
+    IMAGE
+  */
+  if (
+    file.mimetype === 'image/jpeg' ||
+    file.mimetype === 'image/png'
+  ) {
+    const result = await Tesseract.recognize(
+      file.path,
+      'eng'
+    );
+
+    const text = result.data.text?.trim();
+
+    if (!text) {
+      throw new Error(
+        'OCR could not extract readable text from this image.'
+      );
+    }
+
+    return text;
+  }
+
+  throw new Error(
+    'Unsupported document type.'
+  );
+}
+
+
+function cleanValue(value) {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (value === '') {
+    return null;
+  }
+
+  return value;
+}
+
+
+function copyLegacyFields(
+  documentType,
+  fields
+) {
+  const result = {
+    vendor: null,
+    customer: null,
+    invoiceNumber: null,
+    invoiceDate: null,
+    subtotal: null,
+    gst: null,
+    total: null,
+    gstin: null
+  };
+
+  /*
+    Only map fields that actually exist.
+  */
+
+  if (
+    fields.vendor !== undefined
+  ) {
+    result.vendor =
+      cleanValue(fields.vendor);
+  }
+
+  if (
+    fields.customer !== undefined
+  ) {
+    result.customer =
+      cleanValue(fields.customer);
+  }
+
+  if (
+    fields.invoiceNumber !== undefined
+  ) {
+    result.invoiceNumber =
+      cleanValue(fields.invoiceNumber);
+  }
+
+  if (
+    fields.date !== undefined &&
+    (
+      documentType === 'purchase_invoice' ||
+      documentType === 'sales_invoice'
+    )
+  ) {
+    result.invoiceDate =
+      cleanValue(fields.date);
+  }
+
+  if (
+    fields.subtotal !== undefined
+  ) {
+    result.subtotal =
+      cleanValue(fields.subtotal);
+  }
+
+  if (
+    fields.gst !== undefined
+  ) {
+    result.gst =
+      cleanValue(fields.gst);
+  }
+
+  if (
+    fields.total !== undefined
+  ) {
+    result.total =
+      cleanValue(fields.total);
+  }
+
+  if (
+    fields.gstin !== undefined
+  ) {
+    result.gstin =
+      cleanValue(fields.gstin);
+  }
+
+  return result;
+}
+
+
+export async function analyseDocument(
+  file
+) {
+  const ocrText =
+    await extractText(file);
+
+  const geminiResult =
+    await extractWithGemini(
+      ocrText,
+      {
+        mimeType: file.mimetype,
+        buffer: await fs.readFile(file.path)
+      }
+    );
+
+  const documentType =
+    geminiResult.documentType ||
+    'other';
+
+  const extractedFields =
+    geminiResult.fields || {};
+
+  const legacyFields =
+    copyLegacyFields(
+      documentType,
+      extractedFields
+    );
+
+  return {
+    documentType,
+
+    extractedFields,
+
+    confidence:
+      geminiResult.confidence ?? 0,
+
+    validationIssues:
+      geminiResult.validationIssues || [],
+
+    rawText: ocrText,
+
+    ...legacyFields
+  };
+}
+
+
+function number(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ''
+  ) {
+    return null;
+  }
+
+  const parsed =
+    Number(value);
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : null;
+}
+
+
+export function validate(
+  data,
+  existingDocuments = []
+) {
+  const issues = [
+    ...(data.validationIssues || [])
+  ];
+
+  const fields =
+    data.extractedFields || {};
+
+  const documentType =
+    data.documentType || 'other';
+
+
+  /*
+    Check totals only when relevant values
+    are actually available.
+  */
+
+  const subtotal =
+    number(fields.subtotal);
+
+  const gst =
+    number(fields.gst);
+
+  const total =
+    number(fields.total);
+
+
+  if (
+    subtotal !== null &&
+    gst !== null &&
+    total !== null
+  ) {
+    const expected =
+      Number(
+        (subtotal + gst).toFixed(2)
+      );
+
+    const actual =
+      Number(
+        total.toFixed(2)
+      );
+
+    if (
+      Math.abs(expected - actual) > 1
+    ) {
+      issues.push(
+        'Subtotal plus GST does not match the total.'
+      );
+    }
+  }
+
+
+  /*
+    Duplicate invoice detection.
+  */
+
+  if (
+    (
+      documentType === 'purchase_invoice' ||
+      documentType === 'sales_invoice'
+    ) &&
+    fields.invoiceNumber
+  ) {
+    const duplicate =
+      existingDocuments.some(
+        document =>
+          document.documentType ===
+            documentType &&
+          document.invoiceNumber ===
+            fields.invoiceNumber
+      );
+
+    if (duplicate) {
+      issues.push(
+        'A document with the same invoice number already exists.'
+      );
+    }
+  }
+
+
+  /*
+    Required fields only for invoices.
+  */
+
+  if (
+    documentType === 'purchase_invoice' ||
+    documentType === 'sales_invoice'
+  ) {
+    if (!fields.invoiceNumber) {
+      issues.push(
+        'Invoice number could not be identified.'
+      );
+    }
+
+    if (!fields.date) {
+      issues.push(
+        'Invoice date could not be identified.'
+      );
+    }
+  }
+
+
+  /*
+    Receipt-specific validation.
+  */
+
+  if (
+    documentType === 'receipt' &&
+    !fields.total
+  ) {
+    issues.push(
+      'Receipt total could not be identified.'
+    );
+  }
+
+
+  return {
+    validationIssues: [
+      ...new Set(issues)
+    ]
+  };
+}
